@@ -3,10 +3,9 @@
 #include <iostream>
 #include <map>
 
-PianoRoll::Note::Note() : key(0), pitch(0), length(0)  {}
+PianoRoll::Note::Note() : key(0), pitch(0), length(0)  {
+}
 PianoRoll::Note::~Note() {}
-
-
 
 int PianoRoll::Note::draw(PianoRoll &super, SDL_Renderer *ren, SDL_Color col) {
     if (this->key == 0) return 0;
@@ -57,8 +56,10 @@ int PianoRoll::Note::update(PianoRoll &super, GlobalCargo *globals) {
         }
 
         if (resizing) {
-            if (super.resizing_direction == 1)
+            if (super.resizing_direction == 1) {
                 length = (super.innerx + super.inner_mousex)/super.length_unit - key;
+                super.length_memo = length;
+            }
             if (super.resizing_direction == -1) {
                 key = (super.innerx + super.inner_mousex)/super.length_unit;
                 // length = 
@@ -128,14 +129,32 @@ int PianoRoll::Note::update(PianoRoll &super, GlobalCargo *globals) {
 
 
 PianoRoll::PianoRoll(int x, int y, int w, int h, TTF_Font *font, SDL_Color note_col) :
-    w(w), h(h), dragged_note(Note{}), font(font), note_color(note_col)
+    dragged_note(Note{}), font(font), note_color(note_col)
 
 {
     this->x = x;
     this->y = y;
+    this->w = w;
+    this->h = h;
     
     innerx = 0;
     innery = 0;
+
+    for (int i = 0; i < 128; i++) {
+        playing_buffer[i] = 0;
+
+        coll_piano[i].origin[0] = std::make_pair(ORIGIN_PARENT_BOX, this->parent);
+        coll_piano[i].origin[1] = std::make_pair(ORIGIN_SCROLLABLE_Y_ONLY, this);
+        coll_piano[i].fixed = true;
+        coll_piano[i].f_on_click = [i](GlobalCargo *globals){
+            // globals->inst1->note_on((int)i, 1.0f);
+            std::cout << "playing " << i << std::endl;
+        };
+        coll_piano[i].x = 0;
+        coll_piano[i].y = i*gh;
+        coll_piano[i].w = piano_width;
+        coll_piano[i].h = gh;
+    }
 
     // notes.emplace(std::make_pair(3.0f, Note{3.0f, 110, 3}));
 }
@@ -144,7 +163,7 @@ void PianoRoll::zoomx(float scale)
  {
     gw *= scale;
     length_unit = gw/(float)rhythmn;
-    std::cout << gw << " " << length_unit << std::endl;
+    // std::cout << gw << " " << length_unit << std::endl;
 }
 
 void PianoRoll::add_note(float key, int pitch, float length) {
@@ -155,7 +174,9 @@ void PianoRoll::add_note(float key, int pitch, float length) {
     notes.emplace(std::make_pair(key, note));
 }
 
-Message PianoRoll::update\(GlobalCargo *globals) {
+Message PianoRoll::update(GlobalCargo *globals) {
+    this->globals = globals;
+
     inner_mousex = globals->mousex - x;
     inner_mousey= globals->mousey - y;
 
@@ -182,7 +203,13 @@ update_end:
     if (globals->click[SDL_BUTTON_RIGHT]) {
         float key = (innerx + inner_mousex)/length_unit;
         int pitch = 128 - floor((innery+inner_mousey)/gh);
-        add_note(key, pitch, 3);
+        add_note(key, pitch, length_memo);
+    }
+
+    // シークバーの移動
+    if (globals->dblclick[SDL_BUTTON_LEFT]) {
+        float key = (innerx + inner_mousex)/length_unit;
+        globals->seek_key = key;
     }
 
     // 位置移動
@@ -214,7 +241,50 @@ update_end:
         gh /= 1.5f;
     }
 
+    for (int i = 0; i < 128; i++) {
+        this->coll_piano[i].update(globals);
+    }
 
+    
+    if (globals->Playing) {
+        for (int i = 0; i < 128; i++)
+            if (this->playing_buffer[i] > 0) {
+                this->playing_buffer[i] -= globals->seek_step;
+                if (this->playing_buffer[i] < 0) {
+                    // std::cout << this->playing_buffer[i] << globals->seek_step << std::endl;
+                    this->playing_buffer[i] = 0;
+                    globals->inst1->note_off(i);
+                }
+            }
+
+        // auto scrolling
+        innerx = globals->seek_key*length_unit - 200;
+
+        float sec_per_beat = 60.0f / (float)globals->BPM;
+        while (globals->seek_key-globals->seek_step < notes_itr->first &&
+               notes_itr->first < globals->seek_key) {
+            this->playing_buffer[notes_itr->second.pitch] = notes_itr->second.length /*keys*/;
+            
+//            globals->inst2->note_on(notes_itr->second.pitch, notes_itr->second.length * sec_per_beat);
+            globals->inst1->note_on(notes_itr->second.pitch);
+            notes_itr++;
+        }
+    }
+
+    return MSG_OK;
+}
+
+// 現在のシークバーの位置から再生を始める
+void PianoRoll::
+start_playing(GlobalCargo *globals) {
+    notes_itr = notes.lower_bound(globals->seek_key);
+}
+
+void PianoRoll::
+stop_playing() {
+    for (int i = 0; i < 128; i++) {
+        globals->inst1->note_off(i);
+    }
 }
 
 
@@ -236,6 +306,23 @@ void PianoRoll::draw(SDL_Renderer *ren) {
     SDL_Rect r = SDL_Rect{x, y, w, h};
     SDL_SetRenderDrawColor(ren, 80, 80, 80, 255);
     SDL_RenderFillRect(ren, &r);
+
+    // piano
+    SDL_RenderSetClipRect(ren, &r);
+    for (int basey = -(innery%(12*gh)); basey < h; basey += 12*gh) {
+        for (int i = 0; i < 12 ; i++) {
+            // i= 0 1  2 3  4 5  6 7 8  9 10 11
+            //    b a# a g# g f# f e d# d c# c
+            r = SDL_Rect{this->x, this->y+basey+gh*i, w, gh};
+            if (i == 1 || i == 3 || i == 5 || i == 8 || i == 10) {
+//                SDL_SetRenderDrawColor(ren, , 255);
+//                SDL_RenderFillRect(ren, &r);
+            } else {
+                SDL_SetRenderDrawColor(ren, 90, 90, 90, 255);
+                SDL_RenderFillRect(ren, &r);
+            }
+        }
+    }
 
 
     // h2 grid gw/rhythmn x gh
@@ -309,7 +396,13 @@ draw_end:
         SDL_RenderFillRect(ren, &r);
     }
     }
+    for (int i = 0; i < 128; i++) {
+        coll_piano[i].draw(ren);
+    }
     SDL_RenderSetClipRect(ren, 0);
+
+
+
 
 
     // note names
@@ -327,6 +420,11 @@ draw_end:
     }
 
 
+    // seek bar
+    float beatw = (float)gw / rhythmn;
+    float inner_key = globals->seek_key-(float)innerx/beatw;
+    SDL_SetRenderDrawColor(ren, 255,255,0,255);
+    SDL_RenderDrawLine(ren, inner_key*beatw + this->x, this->y, inner_key*beatw + this->x, this->y+this->h); 
 }
 
 PianoRoll::~PianoRoll() {
@@ -338,7 +436,7 @@ PianoRoll::~PianoRoll() {
 // Note::Note() {}
 // Note::~Note() {}
 
-// Message Note::update\(GlobalCargo *globals);
+// Message Note::update(GlobalCargo *globals);
 // void Note::draw(SDL_Renderer *ren) {
     
 // }

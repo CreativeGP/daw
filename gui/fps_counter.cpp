@@ -8,7 +8,8 @@ FpsCounter::FpsCounter(int x, int y, TTF_Font *font) {
     this->sans_font = font;
 }
 
-Message FpsCounter::update\(GlobalCargo *globals) {
+Message FpsCounter::update(GlobalCargo *globals) {
+    return MSG_OK;
 }
 
 void FpsCounter::update_start() {

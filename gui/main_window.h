@@ -22,8 +22,11 @@ public:
     bool has_error() { return this->error; }
 public:
     std::map<std::string, Component *> components;
-    Component *active_window = 0; // Windowクラスに内部値としてselectedを導入する方法もあるが、ここのdrawクラスの挙動を
+    std::string active_com_name;
+    
 private:
+    void change_active(Component* active_com);
+
     SDL_Window *window = 0;
     //SDL_Surface *surface = 0;
     SDL_Renderer *renderer = 0;

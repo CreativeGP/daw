@@ -5,7 +5,7 @@
 PianoRoll::PianoRoll() {
 }
 
-Message PianoRoll::update\(GlobalCargo *globals) {
+Message PianoRoll::update(GlobalCargo *globals) {
 }
 
 void PianoRoll::draw(SDL_Surface *window_surface) {

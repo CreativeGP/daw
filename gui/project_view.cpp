@@ -17,7 +17,8 @@ ProjectView::ProjectView() {
     innery = 0;
 }
 
-Message ProjectView::update\(GlobalCargo *globals) {
+Message ProjectView::update(GlobalCargo *globals) {
+    return MSG_OK;
 }
 
 void ProjectView::draw(SDL_Renderer *ren) {
